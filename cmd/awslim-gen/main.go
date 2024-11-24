@@ -63,7 +63,12 @@ func {{ $.PkgName }}_{{ .Name }}(ctx context.Context, p *clientMethodParam) (any
 
 var {{ .PkgName }}Methods = map[string]ClientMethod{
 {{- range .Methods }}
-	"{{ .Name }}": {{ $.PkgName }}_{{ .Name }},
+	"{{ .Name | lower }}": {{ $.PkgName }}_{{ .Name }},
+{{- end }}
+}
+var {{ .PkgName }}OfficialMethodNames = map[string]string{
+{{- range .Methods }}
+	"{{ .Name | lower }}": "{{ .Name }}",
 {{- end }}
 }
 `
@@ -75,6 +80,12 @@ func init() {
 	clientMethods = map[string]map[string]ClientMethod{
 		{{- range . }}
 		"{{ . }}": {{ . }}Methods,
+		{{- end }}
+	}
+
+	clientOfficialMethodNames = map[string]map[string]string{
+		{{- range . }}
+		"{{ . }}": {{ . }}OfficialMethodNames,
 		{{- end }}
 	}
 }
@@ -174,9 +185,12 @@ func contains(ss []string, s string) bool {
 }
 
 func writeTemplate(t string, v any, name string) error {
+	funcs := template.FuncMap{
+		"lower": strings.ToLower,
+	}
 	filename := name + "_gen.go"
 	log.Printf("generating %s", filename)
-	tmpl, err := template.New("clientGen").Parse(t)
+	tmpl, err := template.New("clientGen").Funcs(funcs).Parse(t)
 	if err != nil {
 		return fmt.Errorf("failed to parse template: %w", err)
 	}
