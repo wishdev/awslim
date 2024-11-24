@@ -16,3 +16,6 @@
 
 .envrc
 *.log
+
+*_gen.go
+awslim
