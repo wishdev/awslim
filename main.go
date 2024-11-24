@@ -29,7 +29,8 @@ func init() {
 
 var Version = "HEAD"
 
-var clientMethods = map[string]map[string]ClientMethod{} // to be defined in main_gen.go
+var clientMethods = map[string]map[string]ClientMethod{}       // to be defined in main_gen.go
+var clientOfficialMethodNames = map[string]map[string]string{} // to be defined in main_gen.go
 
 type ClientMethod func(context.Context, *clientMethodParam) (any, error)
 
@@ -132,16 +133,20 @@ func (c *CLI) SetWriter(w io.Writer) {
 }
 
 func (c *CLI) CallMethod(ctx context.Context) error {
-	method := kebabToPascal(c.Method)
-	key := buildKey(c.Service, method)
 	ms, ok := clientMethods[c.Service]
 	if !ok {
 		return fmt.Errorf("unknown service %s", c.Service)
 	}
+
+	method := strings.ToLower(kebabToPascal(c.Method))
 	fn, ok := ms[method]
 	if !ok {
-		return fmt.Errorf("unknown function %s", key)
+		return fmt.Errorf("unknown function %s", c.Method)
 	}
+
+	offNames, _ := clientOfficialMethodNames[c.Service]
+	key := buildKey(c.Service, offNames[method])
+
 	if c.Input == "help" {
 		c.showHelp(key)
 		return nil
@@ -327,10 +332,10 @@ func (c *CLI) clientMethodParam(ctx context.Context) (*clientMethodParam, error)
 
 func (c *CLI) ListMethods(_ context.Context) error {
 	methods := make([]string, 0)
-	if m, ok := clientMethods[c.Service]; !ok {
+	if m, ok := clientOfficialMethodNames[c.Service]; !ok {
 		return fmt.Errorf("unknown service %s", c.Service)
 	} else {
-		for method := range m {
+		for _, method := range m {
 			methods = append(methods, method)
 		}
 	}
