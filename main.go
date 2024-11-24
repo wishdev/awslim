@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"text/template"
 
 	"github.com/alecthomas/kong"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -29,7 +30,8 @@ func init() {
 
 var Version = "HEAD"
 
-var clientMethods = map[string]map[string]ClientMethod{} // to be defined in main_gen.go
+var clientMethods = map[string]map[string]ClientMethod{}       // to be defined in main_gen.go
+var clientOfficialMethodNames = map[string]map[string]string{} // to be defined in main_gen.go
 
 type ClientMethod func(context.Context, *clientMethodParam) (any, error)
 
@@ -132,16 +134,20 @@ func (c *CLI) SetWriter(w io.Writer) {
 }
 
 func (c *CLI) CallMethod(ctx context.Context) error {
-	method := kebabToPascal(c.Method)
-	key := buildKey(c.Service, method)
 	ms, ok := clientMethods[c.Service]
 	if !ok {
 		return fmt.Errorf("unknown service %s", c.Service)
 	}
+
+	method := strings.ToLower(kebabToPascal(c.Method))
 	fn, ok := ms[method]
 	if !ok {
-		return fmt.Errorf("unknown function %s", key)
+		return fmt.Errorf("unknown function %s", c.Method)
 	}
+
+	offNames, _ := clientOfficialMethodNames[c.Service]
+	key := buildKey(c.Service, offNames[method])
+
 	if c.Input == "help" {
 		c.showHelp(key)
 		return nil
@@ -258,6 +264,51 @@ func (c *CLI) loadInput(_ context.Context) ([]byte, error) {
 	return input, nil
 }
 
+type EndpointData struct {
+	Region  string
+	Service string
+}
+
+func (c *CLI) setEndpoint(awsCfg *aws.Config) {
+	endpoint, ok := os.LookupEnv("AWS_" + strings.ToUpper(c.Service) + "_ENDPOINT")
+
+	if !ok {
+		endpoint, ok = os.LookupEnv("AWS_ENDPOINT")
+	}
+
+	if ok {
+		awsCfg.BaseEndpoint = aws.String(endpoint)
+		return
+	}
+
+	t, ok := os.LookupEnv("AWS_" + strings.ToUpper(c.Service) + "_ENDPOINT_TEMPLATE")
+
+	if !ok {
+		t, ok = os.LookupEnv("AWS_ENDPOINT_TEMPLATE")
+	}
+
+	if ok {
+		ed := EndpointData{
+			Region:  awsCfg.Region,
+			Service: c.Service,
+		}
+
+		tmpl, err := template.New("endpoint").Parse(t)
+		if err != nil {
+			panic(fmt.Errorf("failed to parse template: %w", err))
+		}
+
+		buf := &bytes.Buffer{}
+		if err := tmpl.Execute(buf, ed); err != nil {
+			panic(fmt.Errorf("failed to execute template: %w", err))
+		}
+
+		awsCfg.BaseEndpoint = aws.String(buf.String())
+	}
+
+	return
+}
+
 func (c *CLI) clientMethodParam(ctx context.Context) (*clientMethodParam, error) {
 	awsCfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
@@ -268,6 +319,7 @@ func (c *CLI) clientMethodParam(ctx context.Context) (*clientMethodParam, error)
 		return nil, err
 	}
 
+	c.setEndpoint(&awsCfg)
 	p := &clientMethodParam{
 		awsCfg:       awsCfg,
 		InputBytes:   input,
